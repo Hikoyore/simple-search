@@ -33,11 +33,7 @@ GUI-утилита для поиска текста внутри архивов 
 
 ---
 
-## 🖼 Скриншот
-
-> ```markdown
-> ![Скрин](preview/preview.png)
-> ```
+![Скрин](https://raw.githubusercontent.com/Hikoyore/simple-search/main/preview/preview.png)
 
 ---
 
