@@ -34,3 +34,8 @@
 ```bash
 pip install PySide6
 ```
+
+## Запуск
+```bash
+python main.py
+```
