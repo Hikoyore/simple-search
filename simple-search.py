@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import shutil
 import zipfile
 
@@ -24,7 +25,7 @@ STRINGS = {
         "path_placeholder": r"H:\  или  H:\Mods  или  .",
         "browse": "Обзор…",
         "word_label": "Искать слово:",
-        "ext_label": "Расширение:",
+        "ext_label": "Расширения:",
         "case_cb": "Учитывать регистр",
         "start": "Начать поиск",
         "stop": "Стоп",
@@ -60,7 +61,7 @@ STRINGS = {
         "path_placeholder": r"H:\  or  H:\Mods  or  .",
         "browse": "Browse…",
         "word_label": "Search word:",
-        "ext_label": "Extension:",
+        "ext_label": "Extensions:",
         "case_cb": "Case sensitive",
         "start": "Start search",
         "stop": "Stop",
@@ -143,6 +144,21 @@ def find_line(text: str, word: str, case_sensitive: bool):
     return "(match)"
 
 
+def parse_extensions(raw: str):
+    parts = re.split(r"[,\s;]+", (raw or "").strip().lower())
+    exts = []
+    for p in parts:
+        if not p:
+            continue
+        if not p.startswith("."):
+            p = "." + p
+        if p not in exts:
+            exts.append(p)
+    if not exts:
+        exts = [".ini"]
+    return tuple(exts)
+
+
 class SearchWorker(QThread):
     found = Signal(str, str, str)
     progress = Signal(int, int)
@@ -150,23 +166,27 @@ class SearchWorker(QThread):
     finished_ok = Signal(int, int)
     error = Signal(str)
 
-    def __init__(self, root, word, case_sensitive, target_ext=".ini"):
+    def __init__(self, root, word, case_sensitive, target_exts=(".ini",)):
         super().__init__()
         self.root = root
         self.word = word
         self.case_sensitive = case_sensitive
-        self.target_ext = target_ext
+        self.target_exts = tuple(e.lower() for e in target_exts)
         self._stop = False
 
     def stop(self):
         self._stop = True
+
+    def _matches_ext(self, name: str) -> bool:
+        ln = name.lower()
+        return any(ln.endswith(e) for e in self.target_exts)
 
     def _scan_zip(self, path):
         with zipfile.ZipFile(path) as z:
             for name in z.namelist():
                 if self._stop:
                     return None
-                if name.endswith("/") or not name.lower().endswith(self.target_ext):
+                if name.endswith("/") or not self._matches_ext(name):
                     continue
                 try:
                     data = z.read(name)
@@ -185,7 +205,7 @@ class SearchWorker(QThread):
             for name in r.namelist():
                 if self._stop:
                     return None
-                if not name.lower().endswith(self.target_ext):
+                if not self._matches_ext(name):
                     continue
                 try:
                     data = r.read(name)
@@ -200,7 +220,7 @@ class SearchWorker(QThread):
     def _scan_7z(self, path):
         with py7zr.SevenZipFile(path, mode="r") as z:
             names = [n for n in z.getnames()
-                     if not n.endswith("/") and n.lower().endswith(self.target_ext)]
+                     if not n.endswith("/") and self._matches_ext(n)]
             if not names:
                 return None
             data_map = z.read(targets=names) or {}
@@ -295,7 +315,7 @@ class MainWindow(QMainWindow):
         self.lbl_ext = QLabel()
         row2.addWidget(self.lbl_ext)
         self.ext_edit = QLineEdit(".ini")
-        self.ext_edit.setFixedWidth(70)
+        self.ext_edit.setMinimumWidth(140)
         row2.addWidget(self.ext_edit)
 
         self.case_cb = QCheckBox()
@@ -367,8 +387,8 @@ class MainWindow(QMainWindow):
 
     def _apply_language(self):
         L = lambda k, **kw: tr(self.lang, k, **kw)
-        ext = self.ext_edit.text().strip() or ".ini"
-        self.setWindowTitle(L("window_title", ext=ext))
+        exts = parse_extensions(self.ext_edit.text())
+        self.setWindowTitle(L("window_title", ext=", ".join(exts)))
         self.lbl_path.setText(L("path_label"))
         self.path_edit.setPlaceholderText(L("path_placeholder"))
         self.btn_browse.setText(L("browse"))
@@ -445,11 +465,9 @@ class MainWindow(QMainWindow):
         if not word:
             QMessageBox.warning(self, L("err_title"), L("err_no_word"))
             return
-        ext = self.ext_edit.text().strip().lower()
-        if not ext.startswith("."):
-            ext = "." + ext
+        exts = parse_extensions(self.ext_edit.text())
 
-        self.setWindowTitle(L("window_title", ext=ext))
+        self.setWindowTitle(L("window_title", ext=", ".join(exts)))
         self.table.setRowCount(0)
         self.log_view.clear()
         self.progress.setVisible(True)
@@ -458,7 +476,7 @@ class MainWindow(QMainWindow):
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
 
-        self.worker = SearchWorker(root, word, self.case_cb.isChecked(), ext)
+        self.worker = SearchWorker(root, word, self.case_cb.isChecked(), exts)
         self.worker.found.connect(self.add_result)
         self.worker.progress.connect(self.on_progress)
         self.worker.log.connect(self.log_view.appendPlainText)
